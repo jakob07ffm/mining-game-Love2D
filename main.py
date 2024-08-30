@@ -1,5 +1,5 @@
 function love.load()
-    love.window.setTitle("Enhanced Mining Game")
+    love.window.setTitle("Advanced Mining Game")
     love.window.setMode(800, 600)
 
     gridSize = 25
@@ -7,36 +7,53 @@ function love.load()
     gridHeight = math.floor(love.graphics.getHeight() / gridSize)
 
     mine = {}
-    blockTypes = {"stone", "coal", "gold"}
+    blockTypes = {"stone", "coal", "gold", "diamond"}
     blockColors = {
         stone = {0.5, 0.5, 0.5},
         coal = {0.1, 0.1, 0.1},
-        gold = {1, 0.84, 0}
+        gold = {1, 0.84, 0},
+        diamond = {0, 1, 1}
     }
     blockValues = {
         stone = 1,
         coal = 5,
-        gold = 10
+        gold = 10,
+        diamond = 20
+    }
+    blockDurability = {
+        stone = 1,
+        coal = 2,
+        gold = 3,
+        diamond = 5
     }
 
     for y = 1, gridHeight do
         mine[y] = {}
         for x = 1, gridWidth do
             local r = love.math.random()
-            if r < 0.7 then
-                mine[y][x] = "stone"
-            elseif r < 0.9 then
-                mine[y][x] = "coal"
+            if r < 0.6 then
+                mine[y][x] = {type = "stone", durability = blockDurability.stone}
+            elseif r < 0.85 then
+                mine[y][x] = {type = "coal", durability = blockDurability.coal}
+            elseif r < 0.97 then
+                mine[y][x] = {type = "gold", durability = blockDurability.gold}
             else
-                mine[y][x] = "gold"
+                mine[y][x] = {type = "diamond", durability = blockDurability.diamond}
             end
         end
     end
 
-    player = {x = math.floor(gridWidth / 2), y = math.floor(gridHeight / 2), score = 0}
-    inventory = {stone = 0, coal = 0, gold = 0}
+    player = {
+        x = math.floor(gridWidth / 2),
+        y = math.floor(gridHeight / 2),
+        score = 0,
+        miningPower = 1,
+        inventory = {stone = 0, coal = 0, gold = 0, diamond = 0}
+    }
     miningCooldown = 0.2
     miningTimer = 0
+
+    upgradeCost = 50
 end
 
 function love.update(dt)
@@ -57,11 +74,20 @@ function love.update(dt)
     if love.keyboard.isDown("space") and miningTimer <= 0 then
         local block = mine[player.y][player.x]
         if block then
-            player.score = player.score + blockValues[block]
-            inventory[block] = inventory[block] + 1
-            mine[player.y][player.x] = nil
+            block.durability = block.durability - player.miningPower
+            if block.durability <= 0 then
+                player.score = player.score + blockValues[block.type]
+                player.inventory[block.type] = player.inventory[block.type] + 1
+                mine[player.y][player.x] = nil
+            end
             miningTimer = miningCooldown
         end
+    end
+
+    if love.keyboard.isDown("u") and player.score >= upgradeCost then
+        player.miningPower = player.miningPower + 1
+        player.score = player.score - upgradeCost
+        upgradeCost = upgradeCost * 2
     end
 end
 
@@ -70,7 +96,7 @@ function love.draw()
         for x = 1, gridWidth do
             local block = mine[y][x]
             if block then
-                love.graphics.setColor(blockColors[block])
+                love.graphics.setColor(blockColors[block.type])
                 love.graphics.rectangle("fill", (x-1)*gridSize, (y-1)*gridSize, gridSize, gridSize)
             else
                 love.graphics.setColor(0.2, 0.2, 0.2)
@@ -84,7 +110,7 @@ function love.draw()
 
     love.graphics.setColor(1, 1, 1)
     love.graphics.print("Score: " .. player.score, 10, 10)
-    love.graphics.print("Stone: " .. inventory.stone, 10, 30)
-    love.graphics.print("Coal: " .. inventory.coal, 10, 50)
-    love.graphics.print("Gold: " .. inventory.gold, 10, 70)
+    love.graphics.print("Mining Power: " .. player.miningPower, 10, 30)
+    love.graphics.print("Upgrade Cost: " .. upgradeCost, 10, 50)
+    love.graphics.print("Inventory: Stone: " .. player.inventory.stone .. " Coal: " .. player.inventory.coal .. " Gold: " .. player.inventory.gold .. " Diamond: " .. player.inventory.diamond, 10, 70)
 end
