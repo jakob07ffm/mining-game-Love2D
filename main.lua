@@ -27,6 +27,41 @@ function love.load()
         diamond = 5
     }
 
+    generateMine()
+
+    player = {
+        x = math.floor(gridWidth / 2),
+        y = math.floor(gridHeight / 2),
+        score = 0,
+        miningPower = 1,
+        health = 100,
+        maxHealth = 100,
+        hunger = 100,
+        stamina = 100,
+        inventory = {stone = 0, coal = 0, gold = 0, diamond = 0}
+    }
+    miningCooldown = 0.2
+    miningTimer = 0
+
+    upgradeCost = 50
+    torchCost = 10
+    torchRadius = 3
+    playerTorches = {}
+
+    dayTime = 0
+    dayLength = 60
+    isDay = true
+
+    shop = {
+        {name = "Increase Mining Power", cost = 100, effect = function() player.miningPower = player.miningPower + 1 end},
+        {name = "Restore Health", cost = 50, effect = function() player.health = player.maxHealth end},
+        {name = "Restore Stamina", cost = 30, effect = function() player.stamina = 100 end}
+    }
+
+    currentShopItem = 1
+end
+
+function generateMine()
     for y = 1, gridHeight do
         mine[y] = {}
         for x = 1, gridWidth do
@@ -42,28 +77,15 @@ function love.load()
             end
         end
     end
+    generateCaves()
+end
 
-    player = {
-        x = math.floor(gridWidth / 2),
-        y = math.floor(gridHeight / 2),
-        score = 0,
-        miningPower = 1,
-        health = 100,
-        maxHealth = 100,
-        inventory = {stone = 0, coal = 0, gold = 0, diamond = 0}
-    }
-    miningCooldown = 0.2
-    miningTimer = 0
-
-    upgradeCost = 50
-
-    dayTime = 0
-    dayLength = 60
-    isDay = true
-
-    torchCost = 10
-    torchRadius = 3
-    playerTorches = {}
+function generateCaves()
+    for i = 1, 10 do
+        local caveX = love.math.random(1, gridWidth)
+        local caveY = love.math.random(1, gridHeight)
+        mine[caveY][caveX] = nil
+    end
 end
 
 function love.update(dt)
@@ -71,14 +93,28 @@ function love.update(dt)
         miningTimer = miningTimer - dt
     end
 
+    player.hunger = player.hunger - dt * 0.5
+    player.stamina = math.max(0, player.stamina - dt * 0.5)
+
+    if player.hunger <= 0 or player.stamina <= 0 then
+        player.health = player.health - dt * 5
+        if player.health <= 0 then
+            love.load()
+        end
+    end
+
     if love.keyboard.isDown("up") then
         player.y = math.max(1, player.y - 1)
+        player.stamina = player.stamina - 0.5
     elseif love.keyboard.isDown("down") then
         player.y = math.min(gridHeight, player.y + 1)
+        player.stamina = player.stamina - 0.5
     elseif love.keyboard.isDown("left") then
         player.x = math.max(1, player.x - 1)
+        player.stamina = player.stamina - 0.5
     elseif love.keyboard.isDown("right") then
         player.x = math.min(gridWidth, player.x + 1)
+        player.stamina = player.stamina - 0.5
     end
 
     if love.keyboard.isDown("space") and miningTimer <= 0 then
@@ -103,6 +139,14 @@ function love.update(dt)
     if love.keyboard.isDown("t") and player.inventory.coal >= torchCost then
         table.insert(playerTorches, {x = player.x, y = player.y})
         player.inventory.coal = player.inventory.coal - torchCost
+    end
+
+    if love.keyboard.isDown("s") then
+        local shopItem = shop[currentShopItem]
+        if player.score >= shopItem.cost then
+            player.score = player.score - shopItem.cost
+            shopItem.effect()
+        end
     end
 
     dayTime = dayTime + dt
@@ -160,9 +204,19 @@ function love.draw()
     love.graphics.print("Mining Power: " .. player.miningPower, 10, 30)
     love.graphics.print("Upgrade Cost: " .. upgradeCost, 10, 50)
     love.graphics.print("Health: " .. math.floor(player.health) .. "/" .. player.maxHealth, 10, 70)
-    love.graphics.print("Torch Cost (Coal): " .. torchCost, 10, 90)
-    love.graphics.print("Inventory: Stone: " .. player.inventory.stone .. " Coal: " .. player.inventory.coal .. " Gold: " .. player.inventory.gold .. " Diamond: " .. player.inventory.diamond, 10, 110)
+    love.graphics.print("Hunger: " .. math.floor(player.hunger) .. "/100", 10, 90)
+    love.graphics.print("Stamina: " .. math.floor(player.stamina) .. "/100", 10, 110)
+    love.graphics.print("Torch Cost (Coal): " .. torchCost, 10, 130)
+    love.graphics.print("Inventory: Stone: " .. player.inventory.stone .. " Coal: " .. player.inventory.coal .. " Gold: " .. player.inventory.gold .. " Diamond: " .. player.inventory.diamond, 10, 150)
 
     local dayNightText = isDay and "Day" or "Night"
-    love.graphics.print("Time: " .. dayNightText, 10, 130)
+    love.graphics.print("Time: " .. dayNightText, 10, 170)
+
+    love.graphics.print("Shop: " .. shop[currentShopItem].name .. " (Cost: " .. shop[currentShopItem].cost .. ")", 10, 190)
+end
+
+function love.keypressed(key)
+    if key == "tab" then
+        currentShopItem = currentShopItem % #shop + 1
+    end
 end
