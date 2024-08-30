@@ -48,7 +48,9 @@ function love.load()
         pickaxe = {stone = 5, wood = 2},
         shovel = {stone = 3, wood = 1},
         axe = {stone = 4, wood = 2},
-        smelter = {stone = 10, iron = 5, wood = 3}
+        smelter = {stone = 10, iron = 5, wood = 3},
+        furnace = {stone = 10, iron = 5, wood = 5},
+        workbench = {wood = 10}
     }
     player = {
         x = math.floor(gridWidth / 2),
@@ -175,22 +177,45 @@ function spawnEnemy()
         y = love.math.random(1, gridHeight),
         health = 50,
         damage = 10,
-        range = love.math.random(1, 3)
+        range = love.math.random(1, 3),
+        behavior = love.math.random() > 0.5 and "patrol" or "aggressive",
+        patrolPoints = {}
     }
+    if enemy.behavior == "patrol" then
+        for i = 1, 3 do
+            table.insert(enemy.patrolPoints, {x = love.math.random(1, gridWidth), y = love.math.random(1, gridHeight)})
+        end
+    end
     table.insert(enemies, enemy)
-    if love.math.random() > 0.5 then
-        table.insert(rangedEnemies, enemy)
-    end
-    if love.math.random() > 0.7 then
-        table.insert(specialEnemies, enemy)
-        enemy.specialAbility = "heal" -- Example ability
-    end
+end
+
+function spawnRangedEnemy()
+    local enemy = {
+        x = love.math.random(1, gridWidth),
+        y = love.math.random(1, gridHeight),
+        health = 30,
+        damage = 20,
+        range = love.math.random(4, 6),
+        behavior = "ranged",
+    }
+    table.insert(rangedEnemies, enemy)
+end
+
+function spawnSpecialEnemy()
+    local enemy = {
+        x = love.math.random(1, gridWidth),
+        y = love.math.random(1, gridHeight),
+        health = 100,
+        damage = 15,
+        specialAbility = love.math.random() > 0.5 and "heal" or "buff",
+        abilityCooldown = love.math.random(10, 20),
+        timeSinceLastAbility = 0
+    }
+    table.insert(specialEnemies, enemy)
 end
 
 function love.update(dt)
-    if miningTimer > 0 then
-        miningTimer = miningTimer - dt
-    end
+    miningTimer = miningTimer - dt
 
     if love.keyboard.isDown("w") then player.y = math.max(1, player.y - 1) end
     if love.keyboard.isDown("s") then player.y = math.min(gridHeight, player.y + 1) end
@@ -221,15 +246,35 @@ function love.update(dt)
     spawnEnemyTimer = spawnEnemyTimer - dt
     if spawnEnemyTimer <= 0 then
         spawnEnemy()
+        spawnRangedEnemy()
+        spawnSpecialEnemy()
         spawnEnemyTimer = spawnEnemyCooldown
     end
 
     for i, enemy in ipairs(enemies) do
-        local distance = math.sqrt((player.x - enemy.x)^2 + (player.y - enemy.y)^2)
-        if distance < 1.5 then
-            player.health = player.health - enemy.damage * dt
-            if player.health <= 0 then
-                love.load() -- restart the game if the player dies
+        if enemy.behavior == "patrol" then
+            if #enemy.patrolPoints > 0 then
+                local target = enemy.patrolPoints[1]
+                local directionX = target.x - enemy.x
+                local directionY = target.y - enemy.y
+                local distance = math.sqrt(directionX^2 + directionY^2)
+                if distance > 0 then
+                    directionX = directionX / distance
+                    directionY = directionY / distance
+                    enemy.x = enemy.x + directionX * dt * 30
+                    enemy.y = enemy.y + directionY * dt * 30
+                end
+                if math.abs(enemy.x - target.x) < 1 and math.abs(enemy.y - target.y) < 1 then
+                    table.remove(enemy.patrolPoints, 1)
+                end
+            end
+        else
+            local distance = math.sqrt((player.x - enemy.x)^2 + (player.y - enemy.y)^2)
+            if distance < 1.5 then
+                player.health = player.health - enemy.damage * dt
+                if player.health <= 0 then
+                    love.load() 
+                end
             end
         end
     end
@@ -239,14 +284,21 @@ function love.update(dt)
         if distance < enemy.range then
             player.health = player.health - (enemy.damage / enemy.range) * dt
             if player.health <= 0 then
-                love.load() -- restart the game if the player dies
+                love.load() 
             end
         end
     end
 
     for i, enemy in ipairs(specialEnemies) do
-        if enemy.specialAbility == "heal" then
-            enemy.health = math.min(100, enemy.health + dt * 2)
+        enemy.timeSinceLastAbility = enemy.timeSinceLastAbility + dt
+        if enemy.specialAbility == "heal" and enemy.timeSinceLastAbility > enemy.abilityCooldown then
+            enemy.health = math.min(100, enemy.health + dt * 5)
+            enemy.timeSinceLastAbility = 0
+        elseif enemy.specialAbility == "buff" and enemy.timeSinceLastAbility > enemy.abilityCooldown then
+            for _, e in ipairs(enemies) do
+                e.damage = e.damage + 5
+            end
+            enemy.timeSinceLastAbility = 0
         end
     end
 
@@ -260,7 +312,7 @@ function love.update(dt)
     if currentWeather == "storm" then
         player.health = player.health - dt * 1
         if player.health <= 0 then
-            love.load() -- restart the game if the player dies
+            love.load() 
         end
     end
 
@@ -334,102 +386,84 @@ function love.draw()
 
     local dayNightText = isDay and "Day" or "Night"
     love.graphics.print("Time: " .. dayNightText, 10, 170)
-    love.graphics.print("Weather: " .. currentWeather, 10, 190)
-
-    love.graphics.print("Shop: " .. shop[currentShopItem].name .. " (Cost: " .. shop[currentShopItem].cost .. ")", 10, 210)
 
     if player.base.built then
-        love.graphics.print("Base Level: " .. player.base.level, 10, 230)
-        love.graphics.print("Base Structures: ", 10, 250)
-        local structureY = 270
-        for structure, level in pairs(player.base.structures) do
-            love.graphics.print(structure .. " Level: " .. level, 10, structureY)
-            structureY = structureY + 20
-        end
+        love.graphics.setColor(0, 0, 1)
+        love.graphics.rectangle("line", (player.base.x-1)*gridSize, (player.base.y-1)*gridSize, gridSize, gridSize)
+        love.graphics.print("Base Level: " .. player.base.level, (player.base.x-1)*gridSize + 5, (player.base.y-1)*gridSize + 5)
     end
 
-    love.graphics.print("Quest: " .. quests[currentQuest].description, 10, 290)
-
-    for _, npc in ipairs(npcs) do
-        love.graphics.setColor(1, 1, 1, 0.5)
-        love.graphics.rectangle("fill", (npc.x-1)*gridSize, (npc.y-1)*gridSize, gridSize, gridSize)
+    if player.npcInteraction then
+        local npc = npcs[currentNpc]
         love.graphics.setColor(1, 1, 1)
-        love.graphics.print("NPC", (npc.x-1)*gridSize + 5, (npc.y-1)*gridSize + 5)
+        love.graphics.print(npc.dialogue, love.graphics.getWidth() / 2 - 50, love.graphics.getHeight() / 2)
     end
+
+    if currentQuest <= #quests then
+        love.graphics.print("Quest: " .. quests[currentQuest].description, 10, 190)
+    end
+
+    love.graphics.print("Current Tool: " .. player.equippedTool, 10, 210)
 end
 
-function love.keypressed(key)
-    if key == "tab" then
-        currentShopItem = currentShopItem % #shop + 1
-    elseif key == "c" then
-        craftItem()
-    elseif key == "b" then
-        buildBase()
-    elseif key == "space" and player.weapon.type ~= "fist" then
-        attack()
-    elseif key == "t" then
-        toggleNpcInteraction()
-    end
-end
+function love.mousepressed(x, y, button, istouch, presses)
+    if button == 1 then
+        local tileX = math.floor(x / gridSize) + 1
+        local tileY = math.floor(y / gridSize) + 1
 
-function craftItem()
-    local recipe = craftingRecipes[player.equippedTool]
-    local canCraft = true
+        if tileX > 0 and tileY > 0 and tileX <= gridWidth and tileY <= gridHeight then
+            local block = mine[tileY][tileX]
+            if block then
+                if block.durability > 0 then
+                    block.durability = block.durability - player.miningPower
+                    toolDurability[player.equippedTool] = toolDurability[player.equippedTool] - 1
 
-    for material, amount in pairs(recipe) do
-        if player.inventory[material] < amount then
-            canCraft = false
-        end
-    end
+                    if block.durability <= 0 then
+                        player.inventory[block.type] = player.inventory[block.type] + 1
+                        player.score = player.score + blockValues[block.type]
+                        mine[tileY][tileX] = nil
+                    end
 
-    if canCraft then
-        for material, amount in pairs(recipe) do
-            player.inventory[material] = player.inventory[material] - amount
-        end
-        player.equippedTool = player.equippedTool
-        toolDurability[player.equippedTool] = toolDurability[player.equippedTool] + 50
-    else
-        print("Not enough resources to craft!")
-    end
-end
-
-function buildBase()
-    if not player.base.built then
-        if player.inventory.stone >= 10 and player.inventory.wood >= 5 then
-            player.base.built = true
-            player.inventory.stone = player.inventory.stone - 10
-            player.inventory.wood = player.inventory.wood - 5
-            player.base.x = player.x
-            player.base.y = player.y
-            player.base.level = 1
-            player.base.structures = { farm = 0, workshop = 0 }
-            player.base.structures.farm = 1
-            player.base.structures.workshop = 1
-        else
-            print("Not enough resources to build base!")
-        end
-    else
-        print("Base already built!")
-    end
-end
-
-function attack()
-    for i, enemy in ipairs(enemies) do
-        local distance = math.sqrt((player.x - enemy.x)^2 + (player.y - enemy.y)^2)
-        if distance < 1.5 then
-            enemy.health = enemy.health - player.weapon.damage
-            if enemy.health <= 0 then
-                table.remove(enemies, i)
-                player.kills = player.kills + 1
+                    if toolDurability[player.equippedTool] <= 0 then
+                        player.equippedTool = "fist"
+                        toolDurability[player.equippedTool] = 0
+                    end
+                end
             end
         end
     end
 end
 
-function toggleNpcInteraction()
-    player.npcInteraction = not player.npcInteraction
-    if player.npcInteraction then
-        local npc = npcs[currentNpc]
-        print(npc.dialogue)
+function love.keypressed(key)
+    if key == "b" then
+        buildBase()
+    elseif key == "c" then
+        if player.inventory.stone >= 5 and player.inventory.wood >= 2 then
+            craftTool("pickaxe")
+        end
+    elseif key == "s" then
+        player.score = player.score + 10
+    elseif key == "t" then
+        table.insert(playerTorches, {x = player.x, y = player.y})
+        player.inventory.coal = player.inventory.coal - torchCost
+    elseif key == "f" then
+        if player.inventory.coal >= torchCost then
+            table.insert(playerTorches, {x = player.x, y = player.y})
+            player.inventory.coal = player.inventory.coal - torchCost
+        end
+    elseif key == "i" then
+        player.npcInteraction = not player.npcInteraction
+    elseif key == "r" then
+        if player.inventory.iron >= 10 then
+            player.inventory.iron = player.inventory.iron - 10
+            player.inventory.gold = player.inventory.gold + 1
+        end
+    elseif key == "u" then
+        if player.score >= upgradeCost then
+            player.miningPower = player.miningPower + 1
+            player.score = player.score - upgradeCost
+        end
+    elseif key == "k" then
+        attack()
     end
 end
