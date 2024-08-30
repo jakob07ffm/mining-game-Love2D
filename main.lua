@@ -47,7 +47,8 @@ function love.load()
     craftingRecipes = {
         pickaxe = {stone = 5, wood = 2},
         shovel = {stone = 3, wood = 1},
-        axe = {stone = 4, wood = 2}
+        axe = {stone = 4, wood = 2},
+        smelter = {stone = 10, iron = 5, wood = 3}
     }
     player = {
         x = math.floor(gridWidth / 2),
@@ -60,8 +61,10 @@ function love.load()
         stamina = 100,
         inventory = {stone = 0, coal = 0, gold = 0, diamond = 0, iron = 0, silver = 0, wood = 0},
         equippedTool = "pickaxe",
-        base = {built = false, x = 0, y = 0, level = 0},
-        weapon = {type = "fist", damage = 5}
+        base = {built = false, x = 0, y = 0, level = 0, structures = {}},
+        weapon = {type = "fist", damage = 5},
+        skills = {mining = 1, combat = 1, crafting = 1},
+        npcInteraction = false
     }
     miningCooldown = 0.2
     miningTimer = 0
@@ -73,6 +76,7 @@ function love.load()
 
     enemies = {}
     rangedEnemies = {}
+    specialEnemies = {}
     spawnEnemyCooldown = 5
     spawnEnemyTimer = spawnEnemyCooldown
 
@@ -90,16 +94,24 @@ function love.load()
         {name = "Restore Health", cost = 50, effect = function() player.health = player.maxHealth end},
         {name = "Restore Stamina", cost = 30, effect = function() player.stamina = 100 end},
         {name = "Buy Wood", cost = 20, effect = function() player.inventory.wood = player.inventory.wood + 5 end},
-        {name = "Upgrade Tool Durability", cost = 150, effect = function() toolDurability[player.equippedTool] = toolDurability[player.equippedTool] + 50 end}
+        {name = "Upgrade Tool Durability", cost = 150, effect = function() toolDurability[player.equippedTool] = toolDurability[player.equippedTool] + 50 end},
+        {name = "Trade Iron for Gold", cost = 10, effect = function() if player.inventory.iron >= 10 then player.inventory.iron = player.inventory.iron - 10 player.inventory.gold = player.inventory.gold + 1 end end}
     }
 
     quests = {
         {description = "Mine 10 stone blocks", condition = function() return player.inventory.stone >= 10 end, reward = function() player.score = player.score + 50 end},
         {description = "Build a base", condition = function() return player.base.built end, reward = function() player.health = player.health + 20 end},
-        {description = "Defeat 5 enemies", condition = function() return player.kills >= 5 end, reward = function() player.weapon = {type = "sword", damage = 15} end}
+        {description = "Defeat 5 enemies", condition = function() return player.kills >= 5 end, reward = function() player.weapon = {type = "sword", damage = 15} end},
+        {description = "Smelt 10 ores", condition = function() return player.inventory.iron >= 10 end, reward = function() player.score = player.score + 100 end}
     }
     currentQuest = 1
     player.kills = 0
+
+    npcs = {
+        {x = love.math.random(1, gridWidth), y = love.math.random(1, gridHeight), dialogue = "Hello, I'm an NPC! I can help you with quests."},
+        {x = love.math.random(1, gridWidth), y = love.math.random(1, gridHeight), dialogue = "Need resources? Trade with me!"}
+    }
+    currentNpc = 1
 
     currentShopItem = 1
     generateMine()
@@ -169,6 +181,10 @@ function spawnEnemy()
     if love.math.random() > 0.5 then
         table.insert(rangedEnemies, enemy)
     end
+    if love.math.random() > 0.7 then
+        table.insert(specialEnemies, enemy)
+        enemy.specialAbility = "heal" -- Example ability
+    end
 end
 
 function love.update(dt)
@@ -176,32 +192,13 @@ function love.update(dt)
         miningTimer = miningTimer - dt
     end
 
-    player.hunger = player.hunger - dt * 0.5
-    player.stamina = math.max(0, player.stamina - dt * 0.5)
+    if love.keyboard.isDown("w") then player.y = math.max(1, player.y - 1) end
+    if love.keyboard.isDown("s") then player.y = math.min(gridHeight, player.y + 1) end
+    if love.keyboard.isDown("a") then player.x = math.max(1, player.x - 1) end
+    if love.keyboard.isDown("d") then player.x = math.min(gridWidth, player.x + 1) end
 
-    if player.hunger <= 0 or player.stamina <= 0 then
-        player.health = player.health - dt * 5
-        if player.health <= 0 then
-            love.load()
-        end
-    end
-
-    if love.keyboard.isDown("up") then
-        player.y = math.max(1, player.y - 1)
-        player.stamina = player.stamina - 0.5
-    elseif love.keyboard.isDown("down") then
-        player.y = math.min(gridHeight, player.y + 1)
-        player.stamina = player.stamina - 0.5
-    elseif love.keyboard.isDown("left") then
-        player.x = math.max(1, player.x - 1)
-        player.stamina = player.stamina - 0.5
-    elseif love.keyboard.isDown("right") then
-        player.x = math.min(gridWidth, player.x + 1)
-        player.stamina = player.stamina - 0.5
-    end
-
-    if love.keyboard.isDown("space") and miningTimer <= 0 then
-        local block = mine[player.y][player.x]
+    if miningTimer <= 0 and love.keyboard.isDown("m") then
+        local block = mine[player.y] and mine[player.y][player.x]
         if block and block.durability > 0 then
             block.durability = block.durability - player.miningPower
             toolDurability[player.equippedTool] = toolDurability[player.equippedTool] - 1
@@ -232,7 +229,7 @@ function love.update(dt)
         if distance < 1.5 then
             player.health = player.health - enemy.damage * dt
             if player.health <= 0 then
-                love.load()
+                love.load() -- restart the game if the player dies
             end
         end
     end
@@ -242,8 +239,14 @@ function love.update(dt)
         if distance < enemy.range then
             player.health = player.health - (enemy.damage / enemy.range) * dt
             if player.health <= 0 then
-                love.load()
+                love.load() -- restart the game if the player dies
             end
+        end
+    end
+
+    for i, enemy in ipairs(specialEnemies) do
+        if enemy.specialAbility == "heal" then
+            enemy.health = math.min(100, enemy.health + dt * 2)
         end
     end
 
@@ -257,7 +260,7 @@ function love.update(dt)
     if currentWeather == "storm" then
         player.health = player.health - dt * 1
         if player.health <= 0 then
-            love.load()
+            love.load() -- restart the game if the player dies
         end
     end
 
@@ -337,9 +340,22 @@ function love.draw()
 
     if player.base.built then
         love.graphics.print("Base Level: " .. player.base.level, 10, 230)
+        love.graphics.print("Base Structures: ", 10, 250)
+        local structureY = 270
+        for structure, level in pairs(player.base.structures) do
+            love.graphics.print(structure .. " Level: " .. level, 10, structureY)
+            structureY = structureY + 20
+        end
     end
 
-    love.graphics.print("Quest: " .. quests[currentQuest].description, 10, 250)
+    love.graphics.print("Quest: " .. quests[currentQuest].description, 10, 290)
+
+    for _, npc in ipairs(npcs) do
+        love.graphics.setColor(1, 1, 1, 0.5)
+        love.graphics.rectangle("fill", (npc.x-1)*gridSize, (npc.y-1)*gridSize, gridSize, gridSize)
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.print("NPC", (npc.x-1)*gridSize + 5, (npc.y-1)*gridSize + 5)
+    end
 end
 
 function love.keypressed(key)
@@ -351,6 +367,8 @@ function love.keypressed(key)
         buildBase()
     elseif key == "space" and player.weapon.type ~= "fist" then
         attack()
+    elseif key == "t" then
+        toggleNpcInteraction()
     end
 end
 
@@ -368,20 +386,30 @@ function craftItem()
         for material, amount in pairs(recipe) do
             player.inventory[material] = player.inventory[material] - amount
         end
-        toolDurability[player.equippedTool] = 100
+        player.equippedTool = player.equippedTool
+        toolDurability[player.equippedTool] = toolDurability[player.equippedTool] + 50
+    else
+        print("Not enough resources to craft!")
     end
 end
 
 function buildBase()
-    if not player.base.built and player.inventory.wood >= 10 then
-        player.base.built = true
-        player.base.x = player.x
-        player.base.y = player.y
-        player.inventory.wood = player.inventory.wood - 10
-        player.base.level = 1
-    elseif player.base.built and player.inventory.wood >= 20 then
-        player.base.level = player.base.level + 1
-        player.inventory.wood = player.inventory.wood - 20
+    if not player.base.built then
+        if player.inventory.stone >= 10 and player.inventory.wood >= 5 then
+            player.base.built = true
+            player.inventory.stone = player.inventory.stone - 10
+            player.inventory.wood = player.inventory.wood - 5
+            player.base.x = player.x
+            player.base.y = player.y
+            player.base.level = 1
+            player.base.structures = { farm = 0, workshop = 0 }
+            player.base.structures.farm = 1
+            player.base.structures.workshop = 1
+        else
+            print("Not enough resources to build base!")
+        end
+    else
+        print("Base already built!")
     end
 end
 
@@ -395,5 +423,13 @@ function attack()
                 player.kills = player.kills + 1
             end
         end
+    end
+end
+
+function toggleNpcInteraction()
+    player.npcInteraction = not player.npcInteraction
+    if player.npcInteraction then
+        local npc = npcs[currentNpc]
+        print(npc.dialogue)
     end
 end
