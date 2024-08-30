@@ -7,28 +7,45 @@ function love.load()
     gridHeight = math.floor(love.graphics.getHeight() / gridSize)
 
     mine = {}
-    blockTypes = {"stone", "coal", "gold", "diamond"}
+    biomes = {"forest", "desert", "mountain"}
+    biomeColors = {
+        forest = {0.3, 0.7, 0.3},
+        desert = {0.9, 0.9, 0.5},
+        mountain = {0.5, 0.5, 0.5}
+    }
+    blockTypes = {"stone", "coal", "gold", "diamond", "iron", "silver"}
     blockColors = {
         stone = {0.5, 0.5, 0.5},
         coal = {0.1, 0.1, 0.1},
         gold = {1, 0.84, 0},
-        diamond = {0, 1, 1}
+        diamond = {0, 1, 1},
+        iron = {0.8, 0.8, 0.8},
+        silver = {0.75, 0.75, 0.75}
     }
     blockValues = {
         stone = 1,
         coal = 5,
         gold = 10,
-        diamond = 20
+        diamond = 20,
+        iron = 8,
+        silver = 15
     }
     blockDurability = {
         stone = 1,
         coal = 2,
         gold = 3,
-        diamond = 5
+        diamond = 5,
+        iron = 3,
+        silver = 4
     }
 
-    generateMine()
-
+    tools = {"pickaxe", "shovel", "axe"}
+    toolDurability = {pickaxe = 100, shovel = 100, axe = 100}
+    craftingRecipes = {
+        pickaxe = {stone = 5, wood = 2},
+        shovel = {stone = 3, wood = 1},
+        axe = {stone = 4, wood = 2}
+    }
     player = {
         x = math.floor(gridWidth / 2),
         y = math.floor(gridHeight / 2),
@@ -38,7 +55,8 @@ function love.load()
         maxHealth = 100,
         hunger = 100,
         stamina = 100,
-        inventory = {stone = 0, coal = 0, gold = 0, diamond = 0}
+        inventory = {stone = 0, coal = 0, gold = 0, diamond = 0, iron = 0, silver = 0, wood = 0},
+        equippedTool = "pickaxe"
     }
     miningCooldown = 0.2
     miningTimer = 0
@@ -48,17 +66,28 @@ function love.load()
     torchRadius = 3
     playerTorches = {}
 
+    enemies = {}
+    spawnEnemyCooldown = 5
+    spawnEnemyTimer = spawnEnemyCooldown
+
     dayTime = 0
     dayLength = 60
     isDay = true
 
+    weatherTypes = {"clear", "rain", "storm"}
+    currentWeather = "clear"
+    weatherTimer = 0
+    weatherDuration = love.math.random(20, 40)
+
     shop = {
         {name = "Increase Mining Power", cost = 100, effect = function() player.miningPower = player.miningPower + 1 end},
         {name = "Restore Health", cost = 50, effect = function() player.health = player.maxHealth end},
-        {name = "Restore Stamina", cost = 30, effect = function() player.stamina = 100 end}
+        {name = "Restore Stamina", cost = 30, effect = function() player.stamina = 100 end},
+        {name = "Buy Wood", cost = 20, effect = function() player.inventory.wood = player.inventory.wood + 5 end}
     }
 
     currentShopItem = 1
+    generateMine()
 end
 
 function generateMine()
@@ -66,26 +95,61 @@ function generateMine()
         mine[y] = {}
         for x = 1, gridWidth do
             local r = love.math.random()
-            if r < 0.6 then
-                mine[y][x] = {type = "stone", durability = blockDurability.stone}
-            elseif r < 0.85 then
-                mine[y][x] = {type = "coal", durability = blockDurability.coal}
-            elseif r < 0.97 then
-                mine[y][x] = {type = "gold", durability = blockDurability.gold}
-            else
-                mine[y][x] = {type = "diamond", durability = blockDurability.diamond}
+            local biome = biomes[love.math.random(#biomes)]
+            mine[y][x] = {type = "stone", durability = blockDurability.stone, biome = biome}
+
+            if biome == "forest" then
+                if r < 0.5 then
+                    mine[y][x].type = "stone"
+                elseif r < 0.75 then
+                    mine[y][x].type = "coal"
+                elseif r < 0.9 then
+                    mine[y][x].type = "iron"
+                else
+                    mine[y][x].type = "gold"
+                end
+            elseif biome == "desert" then
+                if r < 0.5 then
+                    mine[y][x].type = "sand"
+                elseif r < 0.75 then
+                    mine[y][x].type = "silver"
+                else
+                    mine[y][x].type = "diamond"
+                end
+            elseif biome == "mountain" then
+                if r < 0.6 then
+                    mine[y][x].type = "stone"
+                elseif r < 0.8 then
+                    mine[y][x].type = "coal"
+                elseif r < 0.95 then
+                    mine[y][x].type = "iron"
+                else
+                    mine[y][x].type = "diamond"
+                end
             end
+
+            mine[y][x].durability = blockDurability[mine[y][x].type] or 1
         end
     end
     generateCaves()
 end
 
 function generateCaves()
-    for i = 1, 10 do
+    for i = 1, 15 do
         local caveX = love.math.random(1, gridWidth)
         local caveY = love.math.random(1, gridHeight)
         mine[caveY][caveX] = nil
     end
+end
+
+function spawnEnemy()
+    local enemy = {
+        x = love.math.random(1, gridWidth),
+        y = love.math.random(1, gridHeight),
+        health = 50,
+        damage = 10
+    }
+    table.insert(enemies, enemy)
 end
 
 function love.update(dt)
@@ -161,6 +225,36 @@ function love.update(dt)
             love.load()
         end
     end
+
+    spawnEnemyTimer = spawnEnemyTimer - dt
+    if spawnEnemyTimer <= 0 then
+        spawnEnemy()
+        spawnEnemyTimer = spawnEnemyCooldown
+    end
+
+    for i, enemy in ipairs(enemies) do
+        local distance = math.sqrt((player.x - enemy.x)^2 + (player.y - enemy.y)^2)
+        if distance < 1.5 then
+            player.health = player.health - enemy.damage * dt
+            if player.health <= 0 then
+                love.load()
+            end
+        end
+    end
+
+    weatherTimer = weatherTimer + dt
+    if weatherTimer > weatherDuration then
+        weatherTimer = 0
+        weatherDuration = love.math.random(20, 40)
+        currentWeather = weatherTypes[love.math.random(#weatherTypes)]
+    end
+
+    if currentWeather == "storm" then
+        player.health = player.health - dt * 1
+        if player.health <= 0 then
+            love.load()
+        end
+    end
 end
 
 function love.draw()
@@ -168,6 +262,8 @@ function love.draw()
         for x = 1, gridWidth do
             local block = mine[y][x]
             if block then
+                love.graphics.setColor(biomeColors[block.biome])
+                love.graphics.rectangle("fill", (x-1)*gridSize, (y-1)*gridSize, gridSize, gridSize)
                 love.graphics.setColor(blockColors[block.type])
                 love.graphics.rectangle("fill", (x-1)*gridSize, (y-1)*gridSize, gridSize, gridSize)
             else
@@ -207,16 +303,37 @@ function love.draw()
     love.graphics.print("Hunger: " .. math.floor(player.hunger) .. "/100", 10, 90)
     love.graphics.print("Stamina: " .. math.floor(player.stamina) .. "/100", 10, 110)
     love.graphics.print("Torch Cost (Coal): " .. torchCost, 10, 130)
-    love.graphics.print("Inventory: Stone: " .. player.inventory.stone .. " Coal: " .. player.inventory.coal .. " Gold: " .. player.inventory.gold .. " Diamond: " .. player.inventory.diamond, 10, 150)
+    love.graphics.print("Inventory: Stone: " .. player.inventory.stone .. " Coal: " .. player.inventory.coal .. " Gold: " .. player.inventory.gold .. " Diamond: " .. player.inventory.diamond .. " Iron: " .. player.inventory.iron .. " Silver: " .. player.inventory.silver .. " Wood: " .. player.inventory.wood, 10, 150)
 
     local dayNightText = isDay and "Day" or "Night"
     love.graphics.print("Time: " .. dayNightText, 10, 170)
+    love.graphics.print("Weather: " .. currentWeather, 10, 190)
 
-    love.graphics.print("Shop: " .. shop[currentShopItem].name .. " (Cost: " .. shop[currentShopItem].cost .. ")", 10, 190)
+    love.graphics.print("Shop: " .. shop[currentShopItem].name .. " (Cost: " .. shop[currentShopItem].cost .. ")", 10, 210)
 end
 
 function love.keypressed(key)
     if key == "tab" then
         currentShopItem = currentShopItem % #shop + 1
+    elseif key == "c" then
+        craftItem()
+    end
+end
+
+function craftItem()
+    local recipe = craftingRecipes[player.equippedTool]
+    local canCraft = true
+
+    for material, amount in pairs(recipe) do
+        if player.inventory[material] < amount then
+            canCraft = false
+        end
+    end
+
+    if canCraft then
+        for material, amount in pairs(recipe) do
+            player.inventory[material] = player.inventory[material] - amount
+        end
+        toolDurability[player.equippedTool] = 100
     end
 end
