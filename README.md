@@ -99,3 +99,4 @@ Feel free to modify and extend the game! Contributions and improvements are welc
 
 4. **Share Your Improvements**:
    - Share your changes or contribute to the project by creating a pull request.
+![](ship_screenshot.JPG)
